@@ -1,0 +1,7 @@
+[package]
+name = "sangfroid"
+version = "0.1.0"
+edition = "2018"
+
+[dependencies]
+bheap = { git = "https://github.com/arindas/bheap" }
