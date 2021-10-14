@@ -107,8 +107,8 @@ where
         job_source: Receiver<Message<Req, Res>>,
         disp_q: Sender<Message<Req, Res>>,
         done: Sender<u64>,
+        uid: u64,
     ) -> Self {
-        let uid = 0;
 
         let worker = thread::spawn(move || -> Result<(), WorkerError> {
             while let Ok(Message::Request(job)) = job_source.recv() {
@@ -132,7 +132,7 @@ where
         });
 
         Worker {
-            uid: 0,
+            uid,
             disp_q,
             worker: Some(worker),
             pending: 0,
