@@ -7,7 +7,7 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use crate::message::Message;
+use crate::{job::Job, message::Message};
 
 /// Worker represents a worker thread capable for receiving
 /// and servicing jobs.
@@ -94,7 +94,6 @@ where
     /// }
     /// // ...
     /// ```
-    #[inline]
     pub fn worker_thread(
         jobs: Receiver<Message<Req, Res>>,
         done: Sender<u64>,
@@ -111,6 +110,14 @@ where
 
             Ok(())
         })
+    }
+
+    /// Dispatches a job to this worker for execution.
+    #[inline]
+    pub fn dispatch(&self, job: Job<Req, Res>) -> Result<(), WorkerError> {
+        self.disp_q
+            .send(Message::Request(job))
+            .or(Err(WorkerError::DispatchFailed))
     }
 
     /// Terminates this worker by sending a Terminate message to the underlying
@@ -131,11 +138,13 @@ where
     }
 
     /// Increments pending tasks by 1.
+    #[inline]
     pub fn inc_load(&mut self) {
         self.pending += 1;
     }
 
     /// Decrements pending tasks by 1.
+    #[inline]
     pub fn dec_load(&mut self) {
         self.pending -= 1;
     }
@@ -169,60 +178,41 @@ mod tests {
     #[test]
     fn worker_task() {
         let (disp_q, jobs) = channel::<Message<u8, u8>>();
-        let (done, _receiver) = channel::<u64>();
+        let (done, done_notif_source) = channel::<u64>();
 
-        let _worker = Worker::new(jobs, disp_q.clone(), done.clone(), 1);
+        let worker = Worker::new(jobs, disp_q.clone(), done.clone(), 1);
 
         let (job, result_src) = Job::with_result_sink(|x: u8| x, 1);
-
-        disp_q
-            .send(Message::Request(job))
-            .expect("message not sent!");
-
+        worker.dispatch(job).expect("job not dispatched!");
+        assert_eq!(done_notif_source.recv().unwrap(), 1);
         assert_eq!(result_src.recv().unwrap(), 1);
     }
 
     #[test]
     fn worker_multiple_tasks() {
         let (disp_q, jobs) = channel::<Message<(u8, u8), u8>>();
-        let (done, _receiver) = channel::<u64>();
+        let (done, done_notif_source) = channel::<u64>();
 
-        let _worker = Worker::new(jobs, disp_q.clone(), done.clone(), 2);
+        let worker = Worker::new(jobs, disp_q.clone(), done.clone(), 2);
 
-        let (job, result_src) =
-            Job::with_result_sink(|(operand1, operand2): (u8, u8)| operand1 + operand2, (2, 2));
-
-        disp_q
-            .send(Message::Request(job))
-            .expect("message not sent!");
-
+        let (job, result_src) = Job::with_result_sink(|(x, y): (u8, u8)| x + y, (2, 2));
+        worker.dispatch(job).expect("job not dispatched!");
+        assert_eq!(done_notif_source.recv().unwrap(), 2);
         assert_eq!(result_src.recv().unwrap(), 4);
 
-        let (job, result_src) =
-            Job::with_result_sink(|(operand1, operand2): (u8, u8)| operand1 - operand2, (2, 2));
-
-        disp_q
-            .send(Message::Request(job))
-            .expect("message not sent!");
-
+        let (job, result_src) = Job::with_result_sink(|(x, y): (u8, u8)| x - y, (2, 2));
+        worker.dispatch(job).expect("job not dispatched!");
+        assert_eq!(done_notif_source.recv().unwrap(), 2);
         assert_eq!(result_src.recv().unwrap(), 0);
 
-        let (job, result_src) =
-            Job::with_result_sink(|(operand1, operand2): (u8, u8)| operand1 * operand2, (2, 2));
-
-        disp_q
-            .send(Message::Request(job))
-            .expect("message not sent!");
-
+        let (job, result_src) = Job::with_result_sink(|(x, y): (u8, u8)| x * y, (2, 2));
+        worker.dispatch(job).expect("job not dispatched!");
+        assert_eq!(done_notif_source.recv().unwrap(), 2);
         assert_eq!(result_src.recv().unwrap(), 4);
 
-        let (job, result_src) =
-            Job::with_result_sink(|(operand1, operand2): (u8, u8)| operand1 / operand2, (2, 2));
-
-        disp_q
-            .send(Message::Request(job))
-            .expect("message not sent!");
-
+        let (job, result_src) = Job::with_result_sink(|(x, y): (u8, u8)| x / y, (2, 2));
+        worker.dispatch(job).expect("job not dispatched!");
+        assert_eq!(done_notif_source.recv().unwrap(), 2);
         assert_eq!(result_src.recv().unwrap(), 1);
     }
 }
