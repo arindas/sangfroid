@@ -9,18 +9,22 @@ use std::{
 
 use crate::{job::Job, message::Message};
 
-/// Worker represents a worker thread capable for receiving
-/// and servicing jobs.
+/// Worker represents a worker thread capable for receiving and servicing jobs.
 pub struct Worker<Req, Res>
 where
     Req: Send + Debug + 'static,
     Res: Send + Debug + 'static,
 {
+    /// uid for uniquely identifying this worker
     uid: u64,
 
+    /// message dispatch queue
     disp_q: Sender<Message<Req, Res>>,
 
+    /// worker thread for executing jobs
     worker: Option<JoinHandle<Result<(), WorkerError>>>,
+
+    /// number of pending jobs to be serviced
     pending: usize,
 }
 
