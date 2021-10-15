@@ -101,9 +101,7 @@ where
         uid: u64,
     ) -> JoinHandle<Result<(), WorkerError>> {
         thread::spawn(move || -> Result<(), WorkerError> {
-            let job_source = jobs;
-
-            while let Ok(Message::Request(job)) = job_source.recv() {
+            while let Ok(Message::Request(job)) = jobs.recv() {
                 job.resp_with_result()
                     .or(Err(WorkerError::ResultResponseFailed))?;
 
@@ -173,17 +171,15 @@ mod tests {
         let (disp_q, jobs) = channel::<Message<u8, u8>>();
         let (done, _receiver) = channel::<u64>();
 
-        {
-            let _worker = Worker::new(jobs, disp_q.clone(), done.clone(), 1);
+        let _worker = Worker::new(jobs, disp_q.clone(), done.clone(), 1);
 
-            let (job, result_src) = Job::with_result_sink(|x: u8| x, 1);
+        let (job, result_src) = Job::with_result_sink(|x: u8| x, 1);
 
-            disp_q
-                .send(Message::Request(job))
-                .expect("message not sent!");
+        disp_q
+            .send(Message::Request(job))
+            .expect("message not sent!");
 
-            assert_eq!(result_src.recv().unwrap(), 1);
-        }
+        assert_eq!(result_src.recv().unwrap(), 1);
     }
 
     #[test]
@@ -191,44 +187,42 @@ mod tests {
         let (disp_q, jobs) = channel::<Message<(u8, u8), u8>>();
         let (done, _receiver) = channel::<u64>();
 
-        {
-            let _worker = Worker::new(jobs, disp_q.clone(), done.clone(), 1);
+        let _worker = Worker::new(jobs, disp_q.clone(), done.clone(), 2);
 
-            let (job, result_src) =
-                Job::with_result_sink(|(operand1, operand2): (u8, u8)| operand1 + operand2, (2, 2));
+        let (job, result_src) =
+            Job::with_result_sink(|(operand1, operand2): (u8, u8)| operand1 + operand2, (2, 2));
 
-            disp_q
-                .send(Message::Request(job))
-                .expect("message not sent!");
+        disp_q
+            .send(Message::Request(job))
+            .expect("message not sent!");
 
-            assert_eq!(result_src.recv().unwrap(), 4);
+        assert_eq!(result_src.recv().unwrap(), 4);
 
-            let (job, result_src) =
-                Job::with_result_sink(|(operand1, operand2): (u8, u8)| operand1 - operand2, (2, 2));
+        let (job, result_src) =
+            Job::with_result_sink(|(operand1, operand2): (u8, u8)| operand1 - operand2, (2, 2));
 
-            disp_q
-                .send(Message::Request(job))
-                .expect("message not sent!");
+        disp_q
+            .send(Message::Request(job))
+            .expect("message not sent!");
 
-            assert_eq!(result_src.recv().unwrap(), 0);
+        assert_eq!(result_src.recv().unwrap(), 0);
 
-            let (job, result_src) =
-                Job::with_result_sink(|(operand1, operand2): (u8, u8)| operand1 * operand2, (2, 2));
+        let (job, result_src) =
+            Job::with_result_sink(|(operand1, operand2): (u8, u8)| operand1 * operand2, (2, 2));
 
-            disp_q
-                .send(Message::Request(job))
-                .expect("message not sent!");
+        disp_q
+            .send(Message::Request(job))
+            .expect("message not sent!");
 
-            assert_eq!(result_src.recv().unwrap(), 4);
+        assert_eq!(result_src.recv().unwrap(), 4);
 
-            let (job, result_src) =
-                Job::with_result_sink(|(operand1, operand2): (u8, u8)| operand1 / operand2, (2, 2));
+        let (job, result_src) =
+            Job::with_result_sink(|(operand1, operand2): (u8, u8)| operand1 / operand2, (2, 2));
 
-            disp_q
-                .send(Message::Request(job))
-                .expect("message not sent!");
+        disp_q
+            .send(Message::Request(job))
+            .expect("message not sent!");
 
-            assert_eq!(result_src.recv().unwrap(), 1);
-        }
+        assert_eq!(result_src.recv().unwrap(), 1);
     }
 }
