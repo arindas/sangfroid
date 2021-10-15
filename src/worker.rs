@@ -1,6 +1,7 @@
 //! Workers in a threadpool.
 
 use std::{
+    cmp::Ordering,
     error::Error,
     fmt::{Debug, Display},
     sync::mpsc::{Receiver, Sender},
@@ -35,6 +36,48 @@ where
 {
     fn uid(&self) -> u64 {
         self.uid
+    }
+}
+
+impl<Req, Res> PartialOrd for Worker<Req, Res>
+where
+    Req: Send + Debug + 'static,
+    Res: Send + Debug + 'static,
+{
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<Req, Res> PartialEq for Worker<Req, Res>
+where
+    Req: Send + Debug + 'static,
+    Res: Send + Debug + 'static,
+{
+    /// Worker are considered equal if they
+    /// have the same number of pending
+    /// tasks.
+    fn eq(&self, other: &Self) -> bool {
+        self.pending == other.pending
+    }
+}
+
+impl<Req, Res> Eq for Worker<Req, Res>
+where
+    Req: Send + Debug + 'static,
+    Res: Send + Debug + 'static,
+{
+}
+
+impl<Req, Res> Ord for Worker<Req, Res>
+where
+    Req: Send + Debug + 'static,
+    Res: Send + Debug + 'static,
+{
+    /// Uses cmp().reverse() on pending tasks to favor
+    /// Workers with lesser number of tasks.
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.pending.cmp(&other.pending).reverse()
     }
 }
 
@@ -74,7 +117,7 @@ where
     pub fn new(
         job_source: Receiver<Message<Req, Res>>,
         disp_q: Sender<Message<Req, Res>>,
-        done: Sender<u64>,
+        done: Sender<Option<u64>>,
         uid: u64,
     ) -> Self {
         Worker {
@@ -100,7 +143,7 @@ where
     /// ```
     pub fn worker_thread(
         jobs: Receiver<Message<Req, Res>>,
-        done: Sender<u64>,
+        done: Sender<Option<u64>>,
         uid: u64,
     ) -> JoinHandle<Result<(), WorkerError>> {
         thread::spawn(move || -> Result<(), WorkerError> {
@@ -108,7 +151,7 @@ where
                 job.resp_with_result()
                     .or(Err(WorkerError::ResultResponseFailed))?;
 
-                done.send(uid)
+                done.send(Some(uid))
                     .or(Err(WorkerError::DoneNotificationFailed))?
             }
 
@@ -174,7 +217,7 @@ mod tests {
     #[test]
     fn worker_new() {
         let (disp_q, jobs) = channel::<Message<(), ()>>();
-        let (done, _) = channel::<u64>();
+        let (done, _) = channel::<Option<u64>>();
 
         Worker::new(jobs, disp_q, done, 0);
     }
@@ -182,41 +225,41 @@ mod tests {
     #[test]
     fn worker_task() {
         let (disp_q, jobs) = channel::<Message<u8, u8>>();
-        let (done, done_notif_source) = channel::<u64>();
+        let (done, done_notif_source) = channel::<Option<u64>>();
 
         let worker = Worker::new(jobs, disp_q.clone(), done.clone(), 1);
 
         let (job, result_src) = Job::with_result_sink(|x: u8| x, 1);
         worker.dispatch(job).expect("job not dispatched!");
-        assert_eq!(done_notif_source.recv().unwrap(), 1);
+        assert_eq!(done_notif_source.recv().unwrap(), Some(1));
         assert_eq!(result_src.recv().unwrap(), 1);
     }
 
     #[test]
     fn worker_multiple_tasks() {
         let (disp_q, jobs) = channel::<Message<(u8, u8), u8>>();
-        let (done, done_notif_source) = channel::<u64>();
+        let (done, done_notif_source) = channel::<Option<u64>>();
 
         let worker = Worker::new(jobs, disp_q.clone(), done.clone(), 2);
 
         let (job, result_src) = Job::with_result_sink(|(x, y): (u8, u8)| x + y, (2, 2));
         worker.dispatch(job).expect("job not dispatched!");
-        assert_eq!(done_notif_source.recv().unwrap(), 2);
+        assert_eq!(done_notif_source.recv().unwrap(), Some(2));
         assert_eq!(result_src.recv().unwrap(), 4);
 
         let (job, result_src) = Job::with_result_sink(|(x, y): (u8, u8)| x - y, (2, 2));
         worker.dispatch(job).expect("job not dispatched!");
-        assert_eq!(done_notif_source.recv().unwrap(), 2);
+        assert_eq!(done_notif_source.recv().unwrap(), Some(2));
         assert_eq!(result_src.recv().unwrap(), 0);
 
         let (job, result_src) = Job::with_result_sink(|(x, y): (u8, u8)| x * y, (2, 2));
         worker.dispatch(job).expect("job not dispatched!");
-        assert_eq!(done_notif_source.recv().unwrap(), 2);
+        assert_eq!(done_notif_source.recv().unwrap(), Some(2));
         assert_eq!(result_src.recv().unwrap(), 4);
 
         let (job, result_src) = Job::with_result_sink(|(x, y): (u8, u8)| x / y, (2, 2));
         worker.dispatch(job).expect("job not dispatched!");
-        assert_eq!(done_notif_source.recv().unwrap(), 2);
+        assert_eq!(done_notif_source.recv().unwrap(), Some(2));
         assert_eq!(result_src.recv().unwrap(), 1);
     }
 }
