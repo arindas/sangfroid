@@ -4,75 +4,13 @@ use std::{
     error::Error,
     fmt::{Debug, Display},
     sync::{
-        mpsc::{channel, Receiver, Sender},
+        mpsc::{Receiver, Sender},
         Arc, Mutex,
     },
     thread::{self, JoinHandle},
 };
 
-/// Represents a job to be submitted to the threadpool.
-pub struct Job<Req, Res>
-where
-    Req: Send,
-    Res: Send,
-{
-    /// Task to be executed
-    task: Box<dyn FnMut(Req) -> Res + Send + 'static>,
-
-    /// request to service
-    req: Req,
-
-    /// Optional result channel to send
-    /// the result of the execution
-    result_sink: Option<Sender<Res>>,
-}
-
-impl<Req, Res> Job<Req, Res>
-where
-    Req: Send,
-    Res: Send,
-{
-    pub fn new<F>(f: F, req: Req) -> Self
-    where
-        F: FnMut(Req) -> Res + Send + 'static,
-    {
-        Job {
-            task: Box::new(f),
-            req,
-            result_sink: None,
-        }
-    }
-
-    pub fn with_result_sink<F>(f: F, req: Req) -> (Self, Receiver<Res>)
-    where
-        F: FnMut(Req) -> Res + Send + 'static,
-    {
-        let (tx, rx) = channel::<Res>();
-
-        (
-            Job {
-                task: Box::new(f),
-                req,
-                result_sink: Some(tx),
-            },
-            rx,
-        )
-    }
-}
-
-/// Message represents a message to be sent to workers
-/// in a threadpool.
-pub enum Message<Req, Res>
-where
-    Req: Send,
-    Res: Send,
-{
-    /// Request for job execution
-    Request(Job<Req, Res>),
-
-    /// Message the thread to terminate itself.
-    Terminate,
-}
+use crate::{job::Job, message::Message};
 
 /// Worker represents a worker thread capable for receiving
 /// and servicing jobs.
@@ -131,15 +69,8 @@ where
     /// Creates a new Worker from the given source, dispatch queue channel and done notice channel.
     /// The done channel and job_source channel are moved into the worker thread closure for
     /// receiving requests and notifying done status respectively.
-    /// The core work loop for the worker thread may be expressed as follows:
-    /// ```text
-    /// // ...
-    /// while let Ok(Request(job)) = job_source.recv() {
-    ///     job.result_channel.send(job.task(job.req));
-    ///     done.send(worker_uid);
-    /// }
-    /// // ...
-    /// ```
+    ///
+    /// The worker expects the `mpsc::Receiver` for the done `mpsc::Sender` to outlive itself.
     pub fn new(
         job_source: Receiver<Message<Req, Res>>,
         disp_q: Sender<Message<Req, Res>>,
@@ -147,26 +78,7 @@ where
         uid: u64,
     ) -> Self {
         let job_source = Arc::new(Mutex::new(job_source));
-
-        let jobs = Arc::clone(&job_source);
-        let worker = thread::spawn(move || -> Result<(), WorkerError> {
-            while let Ok(Message::Request(job)) = jobs.lock().unwrap().recv() {
-                let mut task = job.task;
-
-                let result = task(job.req);
-
-                if let Some(sender) = job.result_sink {
-                    sender
-                        .send(result)
-                        .or(Err(WorkerError::ResultResponseFailed))?
-                }
-
-                done.send(uid)
-                    .or(Err(WorkerError::DoneNotificationFailed))?
-            }
-
-            Ok(())
-        });
+        let worker = Self::worker_thread(Arc::clone(&job_source), done, uid);
 
         Worker {
             uid,
@@ -175,6 +87,38 @@ where
             worker: Some(worker),
             pending: 0,
         }
+    }
+
+    /// Creates a worker thread from the given job source, done notification channel and worker uid.
+    /// This is not meant to be used directly. It is a advisable to construct a `Worker` instead
+    /// since the `Worker` instance also manages the lifecycle and cleanup of the thread.
+    /// ```text
+    /// /// The worker thread core loop
+    ///
+    /// // ...
+    /// while let Ok(Request(job)) = job_source.recv() {
+    ///     job.result_channel.send(job.task(job.req));
+    ///     done.send(worker_uid);
+    /// }
+    /// // ...
+    /// ```
+    #[inline]
+    pub fn worker_thread(
+        jobs: Arc<Mutex<Receiver<Message<Req, Res>>>>,
+        done: Sender<u64>,
+        uid: u64,
+    ) -> JoinHandle<Result<(), WorkerError>> {
+        thread::spawn(move || -> Result<(), WorkerError> {
+            while let Ok(Message::Request(job)) = jobs.lock().unwrap().recv() {
+                job.resp_with_result()
+                    .or(Err(WorkerError::ResultResponseFailed))?;
+
+                done.send(uid)
+                    .or(Err(WorkerError::DoneNotificationFailed))?
+            }
+
+            Ok(())
+        })
     }
 
     /// Terminates this worker by sending a Terminate message to the underlying
@@ -227,8 +171,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc::channel;
     use super::{Job, Message, Worker};
+    use std::sync::mpsc::channel;
 
     #[test]
     fn worker_new() {
@@ -240,20 +184,19 @@ mod tests {
 
     #[test]
     fn worker_task() {
-        let (disp_q, jobs) = channel::<Message<(u8, u8), u8>>();
+        let (disp_q, jobs) = channel::<Message<u8, u8>>();
         let (done, _receiver) = channel::<u64>();
 
         {
             let _worker = Worker::new(jobs, disp_q.clone(), done.clone(), 1);
 
-            let (job, result_src) =
-                Job::with_result_sink(|(operand1, operand2): (u8, u8)| operand1 + operand2, (2, 2));
+            let (job, result_src) = Job::with_result_sink(|x: u8| x, 1);
 
             disp_q
                 .send(Message::Request(job))
                 .expect("message not sent!");
 
-            assert_eq!(result_src.recv().unwrap(), 4);
+            assert_eq!(result_src.recv().unwrap(), 1);
         }
     }
 
