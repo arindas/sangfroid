@@ -20,11 +20,11 @@ Mutex since it is also used by the balancer thread.
 We stay true to the concept:
 >Do not communicate by sharing memory; instead, share memory by communicating.
 
-## Why did you make this?
+### Why did you make this?
 This crate was inspired from the load balancer described in the excellent
 ["Concurrency is not Parallelism"](https://youtu.be/oV9rvDllKEg) talk by Rob Pike.
 
-## Well, did you learn anything?
+### Well, did you learn anything?
 Thread management and synchorization in Rust. I was also able to improve my ownership concepts.
 This was a great project for applying the knowledge I assimilated from the aforementioned
 talk and improve my ability to express my ideas in `Rust`.
@@ -40,7 +40,7 @@ This is a library crate. You may include it in your `Cargo.toml` as follows:
 sangfroid = { git = "https://github.com/arindas/sangfroid" }
 ```
 
-## Why the weird name?
+### Why the weird name?
 >sangfroid /sɒ̃ˈfrwɑː/ noun;
 >composure or coolness shown in danger or under trying circumstances.
 
