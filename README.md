@@ -1,4 +1,6 @@
 # sangfroid
+[![ci-tests](https://github.com/arindas/sangfroid/actions/workflows/ci-tests.yml/badge.svg)](https://github.com/arindas/sangfroid/actions/workflows/ci-tests.yml)
+[![rustdoc](https://github.com/arindas/sangfroid/actions/workflows/rustdoc.yml/badge.svg)](https://github.com/arindas/sangfroid/actions/workflows/rustdoc.yml)
 
 A load balanced thread pool.
 
