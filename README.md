@@ -31,7 +31,7 @@ talk and improve my ability to express my ideas in `Rust`.
 
 ## Dependencies
 This does not depend on any third party crates. The only dependency is the
-[`bheap`](github.com/arindas/bheap) crate, which I wrote for managing the workers.
+[`bheap`](https://github.com/arindas/bheap) crate, which I wrote for managing the workers.
 
 ## Usage
 This is a library crate. You may include it in your `Cargo.toml` as follows:
