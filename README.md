@@ -45,3 +45,6 @@ sangfroid = { git = "https://github.com/arindas/sangfroid" }
 >composure or coolness shown in danger or under trying circumstances.
 
 I found it fitting.
+
+## LICENSE
+`sangfroid` is licensed under the MIT License. See [LICENSE](./LICENSE) for the full license text.
