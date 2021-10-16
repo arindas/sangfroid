@@ -1,0 +1,1 @@
+initSidebarItems({"enum":[["WorkerError",""]],"struct":[["Worker","Worker represents a worker thread capable for receiving and servicing jobs."]]});
