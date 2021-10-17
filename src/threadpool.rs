@@ -42,6 +42,8 @@ impl Display for ThreadPoolError {
 
 impl Error for ThreadPoolError {}
 
+/// Restores the order of the workers in the worker pool after any modifications
+/// to the number of pending tasks they have.
 fn restore_worker_pool_order<Req, Res>(
     worker_pool: &mut BinaryMaxHeap<Worker<Req, Res>>,
     worker_uid: u64,
@@ -67,6 +69,8 @@ where
     };
 }
 
+/// Schedules a new job to the given worker pool by picking up the least loaded
+/// worker and dispatching th job to it.
 fn worker_pool_schedule_job<Req, Res>(
     worker_pool: &mut BinaryMaxHeap<Worker<Req, Res>>,
     job: Job<Req, Res>,
@@ -91,6 +95,8 @@ where
     Ok(())
 }
 
+/// ThreadPool to keep track of worker threads, dynamically dispatch
+/// jobs in a load balanced manner, and distribute load evenly.
 pub struct ThreadPool<Req, Res>
 where
     Req: Send + Debug + 'static,
@@ -108,6 +114,17 @@ where
     Req: Send + Debug + 'static,
     Res: Send + Debug + 'static,
 {
+    /// Creates a new threadpool with the given number of workers and the optionally provided Request and Result types.
+    /// ```
+    /// use sangfroid::threadpool::ThreadPool;
+    /// use sangfroid::job::Job;
+    ///
+    /// let thread_pool = ThreadPool::<u8, u8>::new(1);
+    ///
+    /// let (job, result_src) = Job::with_result_sink(|x| x * 2, 2);
+    /// thread_pool.schedule(job).expect("job not scheduled");
+    /// assert_eq!(result_src.recv().unwrap(), 4);
+    /// ```
     pub fn new(workers: usize) -> Self {
         let (worker_vec, (done_tx, done_rx)) = Self::new_workers(workers);
         let worker_pool = Arc::new(Mutex::new(BinaryMaxHeap::from_vec(worker_vec)));
@@ -121,6 +138,17 @@ where
         }
     }
 
+    /// Returns a `JoinHandle` to a balancer thread for the given worker pool. The balancer
+    /// listens on the given done receiver channel to receive Uids of workers who have
+    /// finished their job and need to get their load decremented.
+    /// The core loop of the balancer may be described as follows in pseudocode:
+    /// ```text
+    /// while uid = done_channel.recv() {
+    ///     restore_worrker_pool_order(worker_pool, uid)
+    /// }
+    /// ```
+    /// Since the worker pool is shared with the main thread for dispatching jobs, we need
+    /// to wrap it in a Mutex.
     pub fn balancer_thread(
         done_channel: Receiver<Option<u64>>,
         worker_heap: Arc<Mutex<BinaryMaxHeap<Worker<Req, Res>>>>,
@@ -140,6 +168,15 @@ where
         })
     }
 
+    /// Creates the given number of workers and returns them in a vector along with the
+    /// ends of the done channel. The workers send their Uid to the send end of the done
+    /// channel to signify completion of a job. The balancer thread received on the
+    /// receiving end of the done channel for uids and balances them accordingly.
+    ///
+    /// One of the key decisions behind this library is that we move channels where they
+    /// are tobe used instead of sharing them with a lock. The send end of the channel
+    /// is cloned and passed to each of the workers. The receiver end returned is meant
+    /// to be moved to the balancer thread's closure.
     pub fn new_workers(
         workers: usize,
     ) -> (
@@ -162,6 +199,26 @@ where
         (worker_vec, (done_tx, done_rx))
     }
 
+    /// Schedules a new job to the worker pool by picking up the least loaded worker
+    /// and dispatching the job to it.
+    /// ```
+    /// use sangfroid::threadpool::ThreadPool;
+    /// use sangfroid::job::Job;
+    ///
+    /// let thread_pool = ThreadPool::<u8, u8>::new(2);
+    ///
+    /// let (job, result_src) = Job::with_result_sink(|x| x * 2, 2);
+    /// thread_pool.schedule(job).expect("job not scheduled");
+    /// assert_eq!(result_src.recv().unwrap(), 4);
+    ///
+    /// let (job, result_src) = Job::with_result_sink(|x| x * 3, 2);
+    /// thread_pool.schedule(job).expect("job not scheduled");
+    /// assert_eq!(result_src.recv().unwrap(), 6);
+    ///
+    /// let (job, result_src) = Job::with_result_sink(|x| x * 4, 2);
+    /// thread_pool.schedule(job).expect("job not scheduled");
+    /// assert_eq!(result_src.recv().unwrap(), 8);
+    /// ```
     pub fn schedule(&self, job: Job<Req, Res>) -> Result<(), ThreadPoolError> {
         if let Some(worker_pool) = &self.pool {
             worker_pool_schedule_job(
@@ -176,6 +233,22 @@ where
         Ok(())
     }
 
+    /// Terminates this threadpool by invoking `drop()` on the worker pool
+    /// and the balancer thread, by sending a None to it via the done
+    /// channel.
+    ///
+    /// We keep resources with custom cleanup inside Options so as to be
+    /// able to move them in to the current scrope and `drop()` them.
+    /// ```
+    /// use sangfroid::threadpool::ThreadPool;
+    /// use sangfroid::job::Job;
+    ///
+    /// let mut thread_pool = ThreadPool::<u8, u8>::new(2);
+    /// thread_pool.terminate();
+    /// ```
+    /// This method is used in the Drop implementation, where the value
+    /// is moved instead of a mutable borrow. It is encourage to rely
+    /// on the Drop mechanism instead for idiomatic cleanup.
     pub fn terminate(&mut self) -> Result<(), ThreadPoolError> {
         // Ensure that all threads complete their jobs and
         // complete pending done notifications if any.
@@ -211,6 +284,10 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::{thread, time::Duration};
+
+    use crate::{job::Job, threadpool::ThreadPoolError};
+
     use super::ThreadPool;
 
     #[test]
@@ -218,5 +295,80 @@ mod tests {
         ThreadPool::<(), ()>::new(0);
 
         ThreadPool::<(), ()>::new(10);
+    }
+
+    #[test]
+    fn empty_thread_pool_schedule_job() {
+        let empty_thread_pool = ThreadPool::<(), ()>::new(0);
+        let job = Job::new(|()| (), ());
+        match empty_thread_pool.schedule(job) {
+            Err(ThreadPoolError::WorkerUnavailable) => {}
+            _ => assert!(false),
+        }
+    }
+
+    #[test]
+    fn thread_pool_schedule_jobs() {
+        {
+            let thread_pool = ThreadPool::<u8, u8>::new(1);
+
+            let (job, result_src) = Job::with_result_sink(|x| x * 2, 2);
+            thread_pool.schedule(job).expect("job not scheduled");
+            assert_eq!(result_src.recv().unwrap(), 4);
+
+            let (job, result_src) = Job::with_result_sink(|x| x * 3, 2);
+            thread_pool.schedule(job).expect("job not scheduled");
+            assert_eq!(result_src.recv().unwrap(), 6);
+
+            let (job, result_src) = Job::with_result_sink(|x| x * 4, 2);
+            thread_pool.schedule(job).expect("job not scheduled");
+            assert_eq!(result_src.recv().unwrap(), 8);
+
+            let (job, result_src) = Job::with_result_sink(|x| x * 5, 2);
+            thread_pool.schedule(job).expect("job not scheduled");
+            assert_eq!(result_src.recv().unwrap(), 10);
+        }
+
+        {
+            let thread_pool = ThreadPool::<u8, u8>::new(2);
+
+            let (job, result_src) = Job::with_result_sink(|x| x * 2, 2);
+            thread_pool.schedule(job).expect("job not scheduled");
+            assert_eq!(result_src.recv().unwrap(), 4);
+
+            let (job, result_src) = Job::with_result_sink(
+                |x| {
+                    thread::sleep(Duration::from_secs(5));
+
+                    return x * 2;
+                },
+                2,
+            );
+            thread_pool.schedule(job).expect("job not scheduled");
+            assert_eq!(result_src.recv().unwrap(), 4);
+
+            let (job, result_src) = Job::with_result_sink(|x| x * 3, 2);
+            thread_pool.schedule(job).expect("job not scheduled");
+            assert_eq!(result_src.recv().unwrap(), 6);
+
+            let (job, result_src) = Job::with_result_sink(|x| x * 4, 2);
+            thread_pool.schedule(job).expect("job not scheduled");
+            assert_eq!(result_src.recv().unwrap(), 8);
+
+            let (job, result_src) = Job::with_result_sink(
+                |x| {
+                    thread::sleep(Duration::from_secs(3));
+
+                    return x * 4;
+                },
+                2,
+            );
+            thread_pool.schedule(job).expect("job not scheduled");
+            assert_eq!(result_src.recv().unwrap(), 8);
+
+            let (job, result_src) = Job::with_result_sink(|x| x * 5, 2);
+            thread_pool.schedule(job).expect("job not scheduled");
+            assert_eq!(result_src.recv().unwrap(), 10);
+        }
     }
 }
