@@ -269,10 +269,7 @@ where
     ///
     /// let mut thread_pool = ThreadPool::<u8, u8>::new(2);
     /// thread_pool.terminate();
-    /// ```
-    /// This method is used in the Drop implementation, where the value
-    /// is moved instead of a mutable borrow. It is encourage to rely
-    /// on the Drop mechanism instead for idiomatic cleanup.
+    /// ``` 
     pub fn terminate(&mut self) -> Result<(), ThreadPoolError> {
         // Ensure that all threads complete their jobs and
         // complete pending done notifications if any.
