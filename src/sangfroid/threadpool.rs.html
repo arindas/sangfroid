@@ -451,9 +451,6 @@
 <span id="451">451</span>
 <span id="452">452</span>
 <span id="453">453</span>
-<span id="454">454</span>
-<span id="455">455</span>
-<span id="456">456</span>
 </pre><pre class="rust">
 <span class="doccomment">//! A load balanced threadpool.</span>
 
@@ -726,10 +723,7 @@
     <span class="doccomment">///</span>
     <span class="doccomment">/// let mut thread_pool = ThreadPool::&lt;u8, u8&gt;::new(2);</span>
     <span class="doccomment">/// thread_pool.terminate();</span>
-    <span class="doccomment">/// ```</span>
-    <span class="doccomment">/// This method is used in the Drop implementation, where the value</span>
-    <span class="doccomment">/// is moved instead of a mutable borrow. It is encourage to rely</span>
-    <span class="doccomment">/// on the Drop mechanism instead for idiomatic cleanup.</span>
+    <span class="doccomment">/// ``` </span>
     <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">terminate</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">ThreadPoolError</span><span class="op">&gt;</span> {
         <span class="comment">// Ensure that all threads complete their jobs and</span>
         <span class="comment">// complete pending done notifications if any.</span>
