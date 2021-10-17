@@ -304,7 +304,7 @@ where
     Req: Send + Debug + 'static,
     Res: Send + Debug + 'static,
 {
-    /// Invokes terminate()
+    /// Invokes `terminate()`
     fn drop(&mut self) {
         self.terminate().unwrap()
     }
