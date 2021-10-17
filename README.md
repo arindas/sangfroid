@@ -22,13 +22,42 @@ Mutex since it is also used by the balancer thread.
 We stay true to the concept:
 >Do not communicate by sharing memory; instead, share memory by communicating.
 
-The base API usage is something like this:
 ```rust
+//! example 0: basic api usage
 let thread_pool = ThreadPool::<u8, u8>::new(1);
 
 let (job, result_src) = Job::with_result_sink(|x| x * 2, 2);
 thread_pool.schedule(job).expect("job not scheduled");
 assert_eq!(result_src.recv().unwrap(), 4);
+
+//! example 1: with shared resource
+let shared_hashmap = Arc::new(RwLock::new(HashMap::<u8, u8>::new()));
+const PLACE_HOLDER: u8 = 5;
+
+assert_eq!(shared_hashmap.read().unwrap().get(&1), None);
+
+let thread_pool = ThreadPool::<((u8, u8), Arc<RwLock<HashMap<u8, u8>>>), ()>::new(2);
+
+let job = Job::new(
+    |((key, value), shared_map)| {
+        shared_map.write().unwrap().insert(key, value);
+    },
+    ((1, 2), Arc::clone(&shared_hashmap)),
+);
+thread_pool.schedule(job).expect("job not scheduled");
+
+let job = Job::new(
+    |((key, _), shared_map)| {
+        shared_map.read().unwrap().get(&key);
+    },
+    ((1, PLACE_HOLDER), Arc::clone(&shared_hashmap)),
+);
+thread_pool.schedule(job).expect("job not scheduled");
+
+// wait some time for writers to finish
+thread::sleep(Duration::from_secs(1));
+
+assert_eq!(shared_hashmap.read().unwrap().get(&1), Some(&2));
 ```
 
 Refer to [API documentation](https://github.com/arindas/sangfroid/sangfroid) for more details.

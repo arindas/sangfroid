@@ -23,6 +23,7 @@ pub enum ThreadPoolError {
     JobSchedulingFailed,
     TermNoticeFailed,
     JoinFailed,
+    WorkerTermFailed,
 }
 
 impl Display for ThreadPoolError {
@@ -36,14 +37,15 @@ impl Display for ThreadPoolError {
                 write!(f, "failed to send term notice to balancer thread")
             }
             ThreadPoolError::JoinFailed => write!(f, "join() on balancer thread failed"),
+            ThreadPoolError::WorkerTermFailed => write!(f, "failed to terminate worker"),
         }
     }
 }
 
 impl Error for ThreadPoolError {}
 
-/// Restores the order of the workers in the worker pool after any modifications
-/// to the number of pending tasks they have.
+/// Restores the order of the workers in the worker pool after any modifications to the
+/// number of pending tasks they have.
 fn restore_worker_pool_order<Req, Res>(
     worker_pool: &mut BinaryMaxHeap<Worker<Req, Res>>,
     worker_uid: u64,
@@ -52,6 +54,10 @@ where
     Req: Send + Debug + 'static,
     Res: Send + Debug + 'static,
 {
+    if worker_pool.is_empty() {
+        return Ok(());
+    }
+
     let mut pool_restored = false;
 
     if let Some(i) = worker_pool.index_in_heap_from_uid(worker_uid) {
@@ -69,8 +75,8 @@ where
     };
 }
 
-/// Schedules a new job to the given worker pool by picking up the least loaded
-/// worker and dispatching th job to it.
+/// Schedules a new job to the given worker pool by picking up the least
+/// loaded worker and dispatching th job to it.
 fn worker_pool_schedule_job<Req, Res>(
     worker_pool: &mut BinaryMaxHeap<Worker<Req, Res>>,
     job: Job<Req, Res>,
@@ -91,6 +97,24 @@ where
     }
 
     worker_pool.restore_heap_property(0);
+
+    Ok(())
+}
+
+/// Terminates all workers in the given pool of workers by popping them
+/// out and invoking `Worker::terminate()` on each of them.
+fn worker_pool_terminate<Req, Res>(
+    worker_pool: &mut BinaryMaxHeap<Worker<Req, Res>>,
+) -> Result<(), ThreadPoolError>
+where
+    Req: Send + Debug + 'static,
+    Res: Send + Debug + 'static,
+{
+    while let Some(mut worker) = worker_pool.pop() {
+        worker
+            .terminate()
+            .or(Err(ThreadPoolError::WorkerTermFailed))?;
+    }
 
     Ok(())
 }
@@ -254,7 +278,14 @@ where
         // complete pending done notifications if any.
         // This is necessary since the receive end of the
         // done channel is to be dropped.
-        drop(self.pool.take());
+        if let Some(worker_pool) = self.pool.take() {
+            worker_pool_terminate(
+                worker_pool
+                    .lock()
+                    .or(Err(ThreadPoolError::LockError))?
+                    .deref_mut(),
+            )?;
+        }
 
         if self.balancer.is_none() {
             return Ok(());
@@ -284,7 +315,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{thread, time::Duration};
+    use std::{
+        collections::HashMap,
+        sync::{Arc, RwLock},
+        thread,
+        time::Duration,
+    };
 
     use crate::{job::Job, threadpool::ThreadPoolError};
 
@@ -309,66 +345,112 @@ mod tests {
 
     #[test]
     fn thread_pool_schedule_jobs() {
-        {
-            let thread_pool = ThreadPool::<u8, u8>::new(1);
+        let thread_pool = ThreadPool::<u8, u8>::new(1);
 
-            let (job, result_src) = Job::with_result_sink(|x| x * 2, 2);
-            thread_pool.schedule(job).expect("job not scheduled");
-            assert_eq!(result_src.recv().unwrap(), 4);
+        let (job, result_src) = Job::with_result_sink(|x| x * 2, 2);
+        thread_pool.schedule(job).expect("job not scheduled");
+        assert_eq!(result_src.recv().unwrap(), 4);
 
-            let (job, result_src) = Job::with_result_sink(|x| x * 3, 2);
-            thread_pool.schedule(job).expect("job not scheduled");
-            assert_eq!(result_src.recv().unwrap(), 6);
+        let (job, result_src) = Job::with_result_sink(|x| x * 3, 2);
+        thread_pool.schedule(job).expect("job not scheduled");
+        assert_eq!(result_src.recv().unwrap(), 6);
 
-            let (job, result_src) = Job::with_result_sink(|x| x * 4, 2);
-            thread_pool.schedule(job).expect("job not scheduled");
-            assert_eq!(result_src.recv().unwrap(), 8);
+        let (job, result_src) = Job::with_result_sink(|x| x * 4, 2);
+        thread_pool.schedule(job).expect("job not scheduled");
+        assert_eq!(result_src.recv().unwrap(), 8);
 
-            let (job, result_src) = Job::with_result_sink(|x| x * 5, 2);
-            thread_pool.schedule(job).expect("job not scheduled");
-            assert_eq!(result_src.recv().unwrap(), 10);
-        }
+        let (job, result_src) = Job::with_result_sink(|x| x * 5, 2);
+        thread_pool.schedule(job).expect("job not scheduled");
+        assert_eq!(result_src.recv().unwrap(), 10);
 
-        {
-            let thread_pool = ThreadPool::<u8, u8>::new(2);
+        // --
 
-            let (job, result_src) = Job::with_result_sink(|x| x * 2, 2);
-            thread_pool.schedule(job).expect("job not scheduled");
-            assert_eq!(result_src.recv().unwrap(), 4);
+        let thread_pool = ThreadPool::<u8, u8>::new(2);
 
-            let (job, result_src) = Job::with_result_sink(
-                |x| {
-                    thread::sleep(Duration::from_secs(5));
+        let (job, result_src) = Job::with_result_sink(|x| x * 2, 2);
+        thread_pool.schedule(job).expect("job not scheduled");
+        assert_eq!(result_src.recv().unwrap(), 4);
 
-                    return x * 2;
-                },
-                2,
-            );
-            thread_pool.schedule(job).expect("job not scheduled");
-            assert_eq!(result_src.recv().unwrap(), 4);
+        let (job, result_src) = Job::with_result_sink(
+            |x| {
+                thread::sleep(Duration::from_secs(3));
 
-            let (job, result_src) = Job::with_result_sink(|x| x * 3, 2);
-            thread_pool.schedule(job).expect("job not scheduled");
-            assert_eq!(result_src.recv().unwrap(), 6);
+                return x * 2;
+            },
+            2,
+        );
+        thread_pool.schedule(job).expect("job not scheduled");
+        assert_eq!(result_src.recv().unwrap(), 4);
 
-            let (job, result_src) = Job::with_result_sink(|x| x * 4, 2);
-            thread_pool.schedule(job).expect("job not scheduled");
-            assert_eq!(result_src.recv().unwrap(), 8);
+        let (job, result_src) = Job::with_result_sink(|x| x * 3, 2);
+        thread_pool.schedule(job).expect("job not scheduled");
+        assert_eq!(result_src.recv().unwrap(), 6);
 
-            let (job, result_src) = Job::with_result_sink(
-                |x| {
-                    thread::sleep(Duration::from_secs(3));
+        let (job, result_src) = Job::with_result_sink(|x| x * 4, 2);
+        thread_pool.schedule(job).expect("job not scheduled");
+        assert_eq!(result_src.recv().unwrap(), 8);
 
-                    return x * 4;
-                },
-                2,
-            );
-            thread_pool.schedule(job).expect("job not scheduled");
-            assert_eq!(result_src.recv().unwrap(), 8);
+        let (job, result_src) = Job::with_result_sink(
+            |x| {
+                thread::sleep(Duration::from_secs(1));
 
-            let (job, result_src) = Job::with_result_sink(|x| x * 5, 2);
-            thread_pool.schedule(job).expect("job not scheduled");
-            assert_eq!(result_src.recv().unwrap(), 10);
-        }
+                return x * 4;
+            },
+            2,
+        );
+        thread_pool.schedule(job).expect("job not scheduled");
+        assert_eq!(result_src.recv().unwrap(), 8);
+
+        let (job, result_src) = Job::with_result_sink(|x| x * 5, 2);
+        thread_pool.schedule(job).expect("job not scheduled");
+        assert_eq!(result_src.recv().unwrap(), 10);
+    }
+
+    #[test]
+    fn threadpool_schedule_jobs_with_shared_resource() {
+        let shared_hashmap = Arc::new(RwLock::new(HashMap::<u8, u8>::new()));
+        const PLACE_HOLDER: u8 = 5;
+
+        assert_eq!(shared_hashmap.read().unwrap().get(&1), None);
+        assert_eq!(shared_hashmap.read().unwrap().get(&7), None);
+
+        let thread_pool = ThreadPool::<((u8, u8), Arc<RwLock<HashMap<u8, u8>>>), ()>::new(2);
+
+        let job = Job::new(
+            |((key, value), shared_map)| {
+                shared_map.write().unwrap().insert(key, value);
+            },
+            ((1, 2), Arc::clone(&shared_hashmap)),
+        );
+        thread_pool.schedule(job).expect("job not scheduled");
+
+        let job = Job::new(
+            |((key, _), shared_map)| {
+                shared_map.read().unwrap().get(&key);
+            },
+            ((1, PLACE_HOLDER), Arc::clone(&shared_hashmap)),
+        );
+        thread_pool.schedule(job).expect("job not scheduled");
+
+        let job = Job::new(
+            |((key, value), shared_map)| {
+                shared_map.write().unwrap().insert(key, value);
+            },
+            ((7, 8), Arc::clone(&shared_hashmap)),
+        );
+        thread_pool.schedule(job).expect("job not scheduled");
+
+        let job = Job::new(
+            |((key, _), shared_map)| {
+                shared_map.read().unwrap().get(&key);
+            },
+            ((5, PLACE_HOLDER), Arc::clone(&shared_hashmap)),
+        );
+        thread_pool.schedule(job).expect("job not scheduled");
+
+        thread::sleep(Duration::from_secs(1));
+
+        assert_eq!(shared_hashmap.read().unwrap().get(&1), Some(&2));
+        assert_eq!(shared_hashmap.read().unwrap().get(&7), Some(&8));
     }
 }
