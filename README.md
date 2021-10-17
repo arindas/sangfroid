@@ -1,6 +1,7 @@
 # sangfroid
 [![ci-tests](https://github.com/arindas/sangfroid/actions/workflows/ci-tests.yml/badge.svg)](https://github.com/arindas/sangfroid/actions/workflows/ci-tests.yml)
 [![rustdoc](https://github.com/arindas/sangfroid/actions/workflows/rustdoc.yml/badge.svg)](https://github.com/arindas/sangfroid/actions/workflows/rustdoc.yml)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Farindas%2Fsangfroid.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2Farindas%2Fsangfroid?ref=badge_shield)
 
 A load balanced thread pool.
 
@@ -90,3 +91,5 @@ I found it fitting.
 
 ## LICENSE
 `sangfroid` is licensed under the MIT License. See [LICENSE](./LICENSE) for the full license text.
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2Farindas%2Fsangfroid.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2Farindas%2Fsangfroid?ref=badge_large)
