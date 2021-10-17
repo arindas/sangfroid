@@ -257,9 +257,9 @@ where
         Ok(())
     }
 
-    /// Terminates this threadpool by invoking `drop()` on the worker pool
-    /// and the balancer thread, by sending a None to it via the done
-    /// channel.
+    /// Terminates this threadpool by invoking `theadpool::worker_pool_terminated()` on the worker pool
+    /// and sending a None to the balancer thread via the done channek to notify termination. We then
+    /// invoke `join()` on the balancer thread.
     ///
     /// We keep resources with custom cleanup inside Options so as to be
     /// able to move them in to the current scrope and `drop()` them.
