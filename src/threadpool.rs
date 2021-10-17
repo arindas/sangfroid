@@ -257,7 +257,7 @@ where
         Ok(())
     }
 
-    /// Terminates this threadpool by invoking `theadpool::worker_pool_terminated()` on the worker pool
+    /// Terminates this threadpool by invoking `theadpool::worker_pool_terminate()` on the worker pool
     /// and sending a None to the balancer thread via the done channek to notify termination. We then
     /// invoke `join()` on the balancer thread.
     ///
