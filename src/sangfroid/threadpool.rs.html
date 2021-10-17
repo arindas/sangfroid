@@ -711,7 +711,7 @@
         <span class="prelude-val">Ok</span>(())
     }
 
-    <span class="doccomment">/// Terminates this threadpool by invoking `theadpool::worker_pool_terminated()` on the worker pool</span>
+    <span class="doccomment">/// Terminates this threadpool by invoking `theadpool::worker_pool_terminate()` on the worker pool</span>
     <span class="doccomment">/// and sending a None to the balancer thread via the done channek to notify termination. We then</span>
     <span class="doccomment">/// invoke `join()` on the balancer thread.</span>
     <span class="doccomment">///</span>
