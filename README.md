@@ -22,6 +22,17 @@ Mutex since it is also used by the balancer thread.
 We stay true to the concept:
 >Do not communicate by sharing memory; instead, share memory by communicating.
 
+The base API usage is something like this:
+```rust
+let thread_pool = ThreadPool::<u8, u8>::new(1);
+
+let (job, result_src) = Job::with_result_sink(|x| x * 2, 2);
+thread_pool.schedule(job).expect("job not scheduled");
+assert_eq!(result_src.recv().unwrap(), 4);
+```
+
+Refer to [API documentation](https://github.com/arindas/sangfroid/sangfroid) for more details.
+
 ### Why did you make this?
 This crate was inspired from the load balancer described in the excellent
 ["Concurrency is not Parallelism"](https://youtu.be/oV9rvDllKEg) talk by Rob Pike.
