@@ -61,7 +61,7 @@ thread::sleep(Duration::from_secs(1));
 assert_eq!(shared_hashmap.read().unwrap().get(&1), Some(&2));
 ```
 
-Refer to [API documentation](https://github.com/arindas/sangfroid/sangfroid) for more details.
+Refer to [API documentation](https://arindas.github.io/sangfroid/sangfroid) for more details.
 
 ### Why did you make this?
 This crate was inspired from the load balancer described in the excellent
